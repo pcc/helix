@@ -4,7 +4,7 @@ use helix_view::tree::Layout;
 use indexmap::IndexMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Args {
     pub display_help: bool,
     pub display_version: bool,

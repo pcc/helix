@@ -1060,6 +1060,7 @@ pub struct EditorClient {
     pub selected_register: Option<char>,
     last_motion: Option<Motion>,
     pub autoinfo: Option<Info>,
+    pub suspended: bool,
 }
 
 #[derive(Debug)]
@@ -1340,6 +1341,7 @@ impl Editor {
             selected_register: None,
             last_motion: None,
             autoinfo: None,
+            suspended: false,
         })
     }
 
@@ -2136,10 +2138,8 @@ impl Editor {
         client_mut!(self, client_id).tree.transpose(&mut self.views);
     }
 
-    pub fn should_close(&self) -> bool {
-        self.clients
-            .iter()
-            .all(|(_, c)| c.tree.is_empty(&self.views))
+    pub fn should_close(&self, client_id: ClientId) -> bool {
+        client!(self, client_id).tree.is_empty(&self.views)
     }
 
     pub fn ensure_cursor_in_view(&mut self, id: ViewId) {

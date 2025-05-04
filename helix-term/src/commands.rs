@@ -6461,7 +6461,7 @@ fn suspend(_cx: &mut Context) {
     #[cfg(not(windows))]
     {
         _cx.block_try_flush_writes().ok();
-        signal_hook::low_level::raise(signal_hook::consts::signal::SIGTSTP).unwrap();
+        client_mut!(_cx.editor, _cx.client_id).suspended = true;
     }
 }
 

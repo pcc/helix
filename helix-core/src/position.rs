@@ -4,6 +4,8 @@ use std::{
     ops::{Add, AddAssign, Sub, SubAssign},
 };
 
+use serde::{Deserialize, Serialize};
+
 use helix_stdx::rope::RopeSliceExt;
 
 use crate::{
@@ -16,7 +18,7 @@ use crate::{
 };
 
 /// Represents a single point in a text buffer. Zero indexed.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Position {
     pub row: usize,
     pub col: usize,

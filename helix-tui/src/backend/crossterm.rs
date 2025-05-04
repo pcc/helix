@@ -3,7 +3,7 @@ use crossterm::{
     cursor::{Hide, MoveTo, SetCursorStyle, Show},
     event::{
         DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
-        EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags,
+        EnableFocusChange, EnableMouseCapture, EventStream, KeyboardEnhancementFlags,
         PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute, queue,
@@ -11,7 +11,7 @@ use crossterm::{
         Attribute as CAttribute, Color as CColor, Colors, Print, SetAttribute, SetBackgroundColor,
         SetColors, SetForegroundColor,
     },
-    terminal::{self, Clear, ClearType},
+    terminal::{self, Clear, ClearType, Terminal},
     Command,
 };
 use helix_view::{
@@ -95,25 +95,22 @@ impl Capabilities {
     }
 }
 
-pub struct CrosstermBackend<W: Write> {
-    buffer: W,
+pub struct CrosstermBackend {
+    terminal: Terminal,
     capabilities: Capabilities,
     supports_keyboard_enhancement_protocol: OnceCell<bool>,
     mouse_capture_enabled: bool,
     supports_bracketed_paste: bool,
 }
 
-impl<W> CrosstermBackend<W>
-where
-    W: Write,
-{
-    pub fn new(buffer: W, config: &EditorConfig) -> CrosstermBackend<W> {
+impl CrosstermBackend {
+    pub fn new(terminal: Terminal, config: &EditorConfig) -> CrosstermBackend {
         // helix is not usable without colors, but crossterm will disable
         // them by default if NO_COLOR is set in the environment. Override
         // this behaviour.
         crossterm::style::force_color_output(true);
         CrosstermBackend {
-            buffer,
+            terminal,
             capabilities: Capabilities::from_env_or_default(config),
             supports_keyboard_enhancement_protocol: OnceCell::new(),
             mouse_capture_enabled: false,
@@ -122,13 +119,13 @@ where
     }
 
     #[inline]
-    fn supports_keyboard_enhancement_protocol(&self) -> bool {
+    fn supports_keyboard_enhancement_protocol(&mut self) -> bool {
         *self.supports_keyboard_enhancement_protocol
             .get_or_init(|| {
                 use std::time::Instant;
 
                 let now = Instant::now();
-                let supported = matches!(terminal::supports_keyboard_enhancement(), Ok(true));
+                let supported = matches!(self.terminal.supports_keyboard_enhancement(), Ok(true));
                 log::debug!(
                     "The keyboard enhancement protocol is {}supported in this terminal (checked in {:?})",
                     if supported { "" } else { "not " },
@@ -137,33 +134,35 @@ where
                 supported
             })
     }
+
+    pub fn input_stream(&mut self) -> &mut EventStream {
+        self.terminal.input_stream()
+    }
+
+    pub fn take_input_stream(&mut self) -> EventStream {
+        self.terminal.take_input_stream()
+    }
 }
 
-impl<W> Write for CrosstermBackend<W>
-where
-    W: Write,
-{
+impl Write for CrosstermBackend {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.buffer.write(buf)
+        self.terminal.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.buffer.flush()
+        self.terminal.flush()
     }
 }
 
-impl<W> Backend for CrosstermBackend<W>
-where
-    W: Write,
-{
+impl Backend for CrosstermBackend {
     fn claim(&mut self, config: Config) -> io::Result<()> {
-        terminal::enable_raw_mode()?;
+        self.terminal.enable_raw_mode()?;
         execute!(
-            self.buffer,
+            self.terminal,
             terminal::EnterAlternateScreen,
             EnableFocusChange
         )?;
-        match execute!(self.buffer, EnableBracketedPaste,) {
+        match execute!(self.terminal, EnableBracketedPaste,) {
             Err(err) if err.kind() == io::ErrorKind::Unsupported => {
                 log::warn!("Bracketed paste is not supported on this terminal.");
                 self.supports_bracketed_paste = false;
@@ -171,14 +170,14 @@ where
             Err(err) => return Err(err),
             Ok(_) => (),
         };
-        execute!(self.buffer, terminal::Clear(terminal::ClearType::All))?;
+        execute!(self.terminal, terminal::Clear(terminal::ClearType::All))?;
         if config.enable_mouse_capture {
-            execute!(self.buffer, EnableMouseCapture)?;
+            execute!(self.terminal, EnableMouseCapture)?;
             self.mouse_capture_enabled = true;
         }
         if self.supports_keyboard_enhancement_protocol() {
             execute!(
-                self.buffer,
+                self.terminal,
                 PushKeyboardEnhancementFlags(
                     KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                         | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
@@ -191,9 +190,9 @@ where
     fn reconfigure(&mut self, config: Config) -> io::Result<()> {
         if self.mouse_capture_enabled != config.enable_mouse_capture {
             if config.enable_mouse_capture {
-                execute!(self.buffer, EnableMouseCapture)?;
+                execute!(self.terminal, EnableMouseCapture)?;
             } else {
-                execute!(self.buffer, DisableMouseCapture)?;
+                execute!(self.terminal, DisableMouseCapture)?;
             }
             self.mouse_capture_enabled = config.enable_mouse_capture;
         }
@@ -203,23 +202,23 @@ where
 
     fn restore(&mut self, config: Config) -> io::Result<()> {
         // reset cursor shape
-        self.buffer
+        self.terminal
             .write_all(self.capabilities.reset_cursor_command.as_bytes())?;
         if config.enable_mouse_capture {
-            execute!(self.buffer, DisableMouseCapture)?;
+            execute!(self.terminal, DisableMouseCapture)?;
         }
         if self.supports_keyboard_enhancement_protocol() {
-            execute!(self.buffer, PopKeyboardEnhancementFlags)?;
+            execute!(self.terminal, PopKeyboardEnhancementFlags)?;
         }
         if self.supports_bracketed_paste {
-            execute!(self.buffer, DisableBracketedPaste,)?;
+            execute!(self.terminal, DisableBracketedPaste,)?;
         }
         execute!(
-            self.buffer,
+            self.terminal,
             DisableFocusChange,
             terminal::LeaveAlternateScreen
         )?;
-        terminal::disable_raw_mode()
+        self.terminal.disable_raw_mode()
     }
 
     fn force_restore() -> io::Result<()> {
@@ -249,7 +248,7 @@ where
         for (x, y, cell) in content {
             // Move the cursor if the previous location was not (x - 1, y)
             if !matches!(last_pos, Some(p) if x == p.0 + 1 && y == p.1) {
-                queue!(self.buffer, MoveTo(x, y))?;
+                queue!(self.terminal, MoveTo(x, y))?;
             }
             last_pos = Some((x, y));
             if cell.modifier != modifier {
@@ -257,12 +256,12 @@ where
                     from: modifier,
                     to: cell.modifier,
                 };
-                diff.queue(&mut self.buffer)?;
+                diff.queue(&mut self.terminal)?;
                 modifier = cell.modifier;
             }
             if cell.fg != fg || cell.bg != bg {
                 queue!(
-                    self.buffer,
+                    self.terminal,
                     SetColors(Colors::new(cell.fg.into(), cell.bg.into()))
                 )?;
                 fg = cell.fg;
@@ -273,7 +272,7 @@ where
             if self.capabilities.has_extended_underlines {
                 if cell.underline_color != underline_color {
                     let color = CColor::from(cell.underline_color);
-                    queue!(self.buffer, SetUnderlineColor(color))?;
+                    queue!(self.terminal, SetUnderlineColor(color))?;
                     underline_color = cell.underline_color;
                 }
             } else {
@@ -285,15 +284,15 @@ where
 
             if new_underline_style != underline_style {
                 let attr = CAttribute::from(new_underline_style);
-                queue!(self.buffer, SetAttribute(attr))?;
+                queue!(self.terminal, SetAttribute(attr))?;
                 underline_style = new_underline_style;
             }
 
-            queue!(self.buffer, Print(&cell.symbol))?;
+            queue!(self.terminal, Print(&cell.symbol))?;
         }
 
         queue!(
-            self.buffer,
+            self.terminal,
             SetUnderlineColor(CColor::Reset),
             SetForegroundColor(CColor::Reset),
             SetBackgroundColor(CColor::Reset),
@@ -302,7 +301,7 @@ where
     }
 
     fn hide_cursor(&mut self) -> io::Result<()> {
-        execute!(self.buffer, Hide)
+        execute!(self.terminal, Hide)
     }
 
     fn show_cursor(&mut self, kind: CursorKind) -> io::Result<()> {
@@ -312,31 +311,34 @@ where
             CursorKind::Underline => SetCursorStyle::SteadyUnderScore,
             CursorKind::Hidden => unreachable!(),
         };
-        execute!(self.buffer, Show, shape)
+        execute!(self.terminal, Show, shape)
     }
 
     fn get_cursor(&mut self) -> io::Result<(u16, u16)> {
-        crossterm::cursor::position()
+        self.terminal
+            .cursor_position()
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
     }
 
     fn set_cursor(&mut self, x: u16, y: u16) -> io::Result<()> {
-        execute!(self.buffer, MoveTo(x, y))
+        execute!(self.terminal, MoveTo(x, y))
     }
 
     fn clear(&mut self) -> io::Result<()> {
-        execute!(self.buffer, Clear(ClearType::All))
+        execute!(self.terminal, Clear(ClearType::All))
     }
 
     fn size(&self) -> io::Result<Rect> {
-        let (width, height) =
-            terminal::size().map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        let (width, height) = self
+            .terminal
+            .size()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
         Ok(Rect::new(0, 0, width, height))
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.buffer.flush()
+        self.terminal.flush()
     }
 }
 
