@@ -4,7 +4,7 @@ use helix_view::tree::Layout;
 use indexmap::IndexMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Args {
     pub display_help: bool,
     pub display_version: bool,
@@ -19,6 +19,8 @@ pub struct Args {
     pub config_file: Option<PathBuf>,
     pub files: IndexMap<PathBuf, Vec<Position>>,
     pub working_directory: Option<PathBuf>,
+    pub client: Option<PathBuf>,
+    pub server: Option<PathBuf>,
 }
 
 impl Args {
@@ -73,6 +75,14 @@ impl Args {
                 "--log" => match argv.next().as_deref() {
                     Some(path) => args.log_file = Some(path.into()),
                     None => anyhow::bail!("--log must specify a path to write"),
+                },
+                "--client" => match argv.next().as_deref() {
+                    Some(path) => args.client = Some(path.into()),
+                    None => anyhow::bail!("--client must specify a socket path"),
+                },
+                "--server" => match argv.next().as_deref() {
+                    Some(path) => args.server = Some(path.into()),
+                    None => anyhow::bail!("--log must specify a socket path"),
                 },
                 "-w" | "--working-dir" => match argv.next().as_deref() {
                     Some(path) => {

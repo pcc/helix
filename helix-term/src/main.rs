@@ -1,9 +1,20 @@
 use anyhow::{Context, Error, Result};
-use crossterm::event::EventStream;
+use crossterm::terminal::{tty_file, winch_signal_receiver, Terminal};
 use helix_loader::VERSION_AND_GIT_HASH;
-use helix_term::application::Application;
+use helix_stdx::socket::{read_fd, write_fd};
+use helix_term::application::{Application, ApplicationClient, ClientInfo};
 use helix_term::args::Args;
 use helix_term::config::{Config, ConfigLoadError};
+use std::io::{ErrorKind, Read, Write};
+use std::os::unix::net::UnixStream;
+use tokio::io::AsyncWriteExt;
+use tokio::{
+    net::{UnixListener, UnixSocket},
+    task::spawn_blocking,
+};
+use tokio_stream::StreamNotifyClose;
+use tokio_util::io::SyncIoBridge;
+use {signal_hook::consts::signal, signal_hook_tokio::Signals};
 
 fn setup_logging(verbosity: u64) -> Result<()> {
     let mut base_config = fern::Dispatch::new();
@@ -34,16 +45,7 @@ fn setup_logging(verbosity: u64) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let exit_code = main_impl()?;
-    std::process::exit(exit_code);
-}
-
-#[tokio::main]
-async fn main_impl() -> Result<i32> {
     let args = Args::parse_args().context("could not parse arguments")?;
-
-    helix_loader::initialize_config_file(args.config_file.clone());
-    helix_loader::initialize_log_file(args.log_file.clone());
 
     // Help has a higher priority and should be handled separately.
     if args.display_help {
@@ -84,6 +86,56 @@ FLAGS:
         );
         std::process::exit(0);
     }
+
+    let exit_code = if let Some(path) = args.client.as_ref() {
+        let mut client_sock = UnixStream::connect(path)?;
+        write_fd(&client_sock, &tty_file()?)?;
+        rmp_serde::encode::write(&mut client_sock, &ClientInfo::from_args(&args))?;
+        client_sock.set_nonblocking(true)?;
+        client(client_sock)?
+    } else {
+        server(args)?
+    };
+    std::process::exit(exit_code);
+}
+
+#[tokio::main]
+async fn client(socket: UnixStream) -> Result<i32> {
+    let mut socket = tokio::net::UnixStream::from_std(socket)?;
+    let mut signals = Signals::new([signal::SIGTSTP, signal::SIGCONT, signal::SIGWINCH])?;
+
+    use futures_util::StreamExt;
+
+    loop {
+        tokio::select! {
+            Some(signal) = signals.next() => {
+                socket.write_u8(signal as u8).await?;
+            }
+            _ = socket.readable() => {
+                let mut buf = [0];
+                match socket.try_read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        return Ok(buf[0] as i32);
+                    }
+                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                        continue;
+                    }
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(0)
+}
+
+#[tokio::main]
+async fn server(args: Args) -> Result<i32> {
+    helix_loader::initialize_config_file(args.config_file.clone());
+    helix_loader::initialize_log_file(args.log_file.clone());
 
     if args.display_version {
         println!("helix {}", VERSION_AND_GIT_HASH);
@@ -147,10 +199,28 @@ FLAGS:
         helix_core::config::default_lang_loader()
     });
 
-    // TODO: use the thread local executor to spawn the application task separately from the work pool
-    let mut app = Application::new(args, config, lang_loader).context("unable to start Helix")?;
+    let exit_code = if args.server.is_some() {
+        let server_path = args.server.as_ref().unwrap().clone();
+        let socket = UnixSocket::new_stream()?;
+        socket.bind(server_path)?;
 
-    let exit_code = app.run(&mut EventStream::new()).await?;
+        let listener = socket.listen(1024)?;
+
+        // TODO: use the thread local executor to spawn the application task separately from the work pool
+        let mut app = Application::new(config.clone(), lang_loader, listener)
+            .context("unable to start Helix")?;
+
+        app.run().await?
+    } else {
+        12345
+        //app.add_client(args, ApplicationClient::new(config, stdout())?)?;
+
+        //app.run(&mut EventStream::with_unix_term(
+        //    tty_file()?,
+        //    winch_signal_receiver()?,
+        //))
+        //.await?
+    };
 
     Ok(exit_code)
 }

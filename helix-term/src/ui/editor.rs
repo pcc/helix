@@ -1154,11 +1154,7 @@ impl EditorView {
         if let Some((on_next_key, _)) = self.on_next_key.take() {
             on_next_key(cxt, null_key_event);
         }
-        self.handle_keymap_event(
-            client!(cxt.editor, cxt.client_id).mode,
-            cxt,
-            null_key_event,
-        );
+        self.handle_keymap_event(client!(cxt.editor, cxt.client_id).mode, cxt, null_key_event);
         self.pseudo_pending.clear();
     }
 
@@ -1536,7 +1532,7 @@ impl Component for EditorView {
 
                 // if the command consumed the last view, skip the render.
                 // on the next loop cycle the Application will then terminate.
-                if cx.editor.should_close() {
+                if cx.editor.should_close(cx.client_id) {
                     return EventResult::Ignored(None);
                 }
 

@@ -1,4 +1,5 @@
 use crate::{editor::ViewMap, graphics::Rect, View, ViewId};
+use serde::{Deserialize, Serialize};
 
 // the dimensions are recomputed on window resize/tree change.
 //
@@ -42,7 +43,7 @@ impl Node {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Layout {
     Horizontal,
     Vertical,
