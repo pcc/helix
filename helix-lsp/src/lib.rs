@@ -871,7 +871,8 @@ fn start_client(
     root_dirs: &[PathBuf],
     enable_snippets: bool,
 ) -> Result<NewClient, StartupError> {
-    let (workspace, workspace_is_cwd) = helix_loader::find_workspace();
+    let (workspace, workspace_is_cwd) =
+        helix_loader::find_workspace(helix_stdx::env::current_working_dir().as_path());
     let workspace = path::normalize(workspace);
     let root = find_lsp_workspace(
         doc_path

@@ -63,8 +63,9 @@ impl Registers {
                 Some(RegisterValues::new(doc.selection(view.id).fragments(text)))
             }
             '%' => {
-                let path = doc!(editor, client_id).display_name();
-                Some(RegisterValues::new(iter::once(path)))
+                let path =
+                    doc!(editor, client_id).display_name(client!(editor, client_id).cwd.as_path());
+                Some(RegisterValues::new(iter::once(Cow::Owned(path))))
             }
             '*' | '+' => Some(read_from_clipboard(
                 &self.clipboard_provider.load(),

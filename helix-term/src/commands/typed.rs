@@ -14,6 +14,7 @@ use helix_stdx::path::home_dir;
 use helix_view::document::{read_to_string, DEFAULT_LANGUAGE_NAME};
 use helix_view::editor::{CloseError, ConfigEvent};
 use helix_view::expansion;
+use path::canonicalize;
 use serde_json::Value;
 use ui::completers::{self, Completer};
 
@@ -150,8 +151,12 @@ fn buffer_close_by_ids_impl(
     let (modified_ids, modified_names): (Vec<_>, Vec<_>) = doc_ids
         .iter()
         .filter_map(|&doc_id| {
-            if let Err(CloseError::BufferModified(name)) = cx.editor.close_document(doc_id, force) {
-                Some((doc_id, name))
+            if let Err(CloseError::BufferModified) = cx.editor.close_document(doc_id, force) {
+                Some((
+                    doc_id,
+                    doc_with_id!(cx.editor, &doc_id)
+                        .display_name(client!(cx.editor, cx.client_id).cwd.as_path()),
+                ))
             } else {
                 None
             }
@@ -192,7 +197,10 @@ fn buffer_gather_paths_impl(
     for arg in args {
         let doc_id = editor.documents().find_map(|doc| {
             let arg_path = Some(Path::new(arg.as_ref()));
-            if doc.path().map(|p| p.as_path()) == arg_path || doc.relative_path() == arg_path {
+            if doc.path().map(|p| p.as_path()) == arg_path
+                || doc.relative_path(client!(editor, client_id).cwd.as_path())
+                    == arg_path.map(|p| p.into())
+            {
                 Some(doc.id())
             } else {
                 None
@@ -335,7 +343,8 @@ fn buffer_previous(
 fn write_impl(cx: &mut compositor::Context, path: Option<&str>, force: bool) -> anyhow::Result<()> {
     let config = cx.editor.config();
     let jobs = &mut cx.jobs;
-    let (_client, view, doc) = current!(cx.editor, cx.client_id);
+    let (client, view, doc) = current!(cx.editor, cx.client_id);
+    let path = path.map(|path| canonicalize(client.cwd.clone(), path));
 
     if doc.trim_trailing_whitespace() {
         trim_trailing_whitespace(doc, view.id);
@@ -358,7 +367,7 @@ fn write_impl(cx: &mut compositor::Context, path: Option<&str>, force: bool) -> 
                 doc.version(),
                 view.id,
                 fmt,
-                Some((path.map(Into::into), force)),
+                Some((path.clone(), force)),
             );
 
             jobs.add(Job::with_callback(callback).wait_before_exiting());
@@ -697,7 +706,9 @@ pub(super) fn buffers_remaining_impl(
 
         let modified_names: Vec<_> = modified_ids
             .iter()
-            .map(|doc_id| doc_with_id!(editor, doc_id).display_name())
+            .map(|doc_id| {
+                doc_with_id!(editor, doc_id).display_name(client!(editor, client_id).cwd.as_path())
+            })
             .collect();
 
         bail!(
@@ -1151,14 +1162,14 @@ fn change_current_directory(
     let dir = match args.first().map(AsRef::as_ref) {
         Some("-") => cx
             .editor
-            .get_last_cwd()
+            .get_last_cwd(cx.client_id)
             .map(|path| Cow::Owned(path.to_path_buf()))
             .ok_or_else(|| anyhow!("No previous working directory"))?,
         Some(path) => helix_stdx::path::expand_tilde(Path::new(path)),
         None => Cow::Owned(home_dir()?),
     };
 
-    cx.editor.set_cwd(&dir).map_err(|err| {
+    cx.editor.set_cwd(cx.client_id, &dir).map_err(|err| {
         anyhow!(
             "Could not change working directory to '{}': {err}",
             dir.display()
@@ -1167,7 +1178,7 @@ fn change_current_directory(
 
     cx.editor.set_status(format!(
         "Current working directory is now {}",
-        helix_stdx::env::current_working_dir().display()
+        cx.editor.clients.get(cx.client_id).unwrap().cwd.display()
     ));
 
     Ok(())
@@ -1182,7 +1193,7 @@ fn show_current_directory(
         return Ok(());
     }
 
-    let cwd = helix_stdx::env::current_working_dir();
+    let cwd = cx.editor.get_cwd(cx.client_id);
     let message = format!("Current working directory is {}", cwd.display());
 
     if cwd.exists() {

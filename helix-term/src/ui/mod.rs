@@ -396,7 +396,7 @@ pub mod completers {
     use helix_core::syntax::LanguageServerFeature;
     use helix_view::document::SCRATCH_BUFFER_NAME;
     use helix_view::theme;
-    use helix_view::{ClientId, editor::Config, Editor};
+    use helix_view::{editor::Config, ClientId, Editor};
     use once_cell::sync::Lazy;
     use std::borrow::Cow;
     use std::collections::BTreeSet;
@@ -408,9 +408,9 @@ pub mod completers {
         Vec::new()
     }
 
-    pub fn buffer(editor: &Editor, _client_id: ClientId, input: &str) -> Vec<Completion> {
+    pub fn buffer(editor: &Editor, client_id: ClientId, input: &str) -> Vec<Completion> {
         let names = editor.documents.values().map(|doc| {
-            doc.relative_path()
+            doc.relative_path(client!(editor, client_id).cwd.as_path())
                 .map(|p| p.display().to_string().into())
                 .unwrap_or_else(|| Cow::from(SCRATCH_BUFFER_NAME))
         });
@@ -502,16 +502,17 @@ pub mod completers {
             .collect()
     }
 
-    pub fn filename(editor: &Editor, _client_id: ClientId, input: &str) -> Vec<Completion> {
-        filename_with_git_ignore(editor, input, true)
+    pub fn filename(editor: &Editor, client_id: ClientId, input: &str) -> Vec<Completion> {
+        filename_with_git_ignore(editor, client_id, input, true)
     }
 
     pub fn filename_with_git_ignore(
         editor: &Editor,
+        client_id: ClientId,
         input: &str,
         git_ignore: bool,
     ) -> Vec<Completion> {
-        filename_impl(editor, input, git_ignore, |entry| {
+        filename_impl(editor, client_id, input, git_ignore, |entry| {
             let is_dir = entry.file_type().is_some_and(|entry| entry.is_dir());
 
             if is_dir {
@@ -557,16 +558,17 @@ pub mod completers {
             .collect()
     }
 
-    pub fn directory(editor: &Editor, _client_id: ClientId, input: &str) -> Vec<Completion> {
-        directory_with_git_ignore(editor, input, true)
+    pub fn directory(editor: &Editor, client_id: ClientId, input: &str) -> Vec<Completion> {
+        directory_with_git_ignore(editor, client_id, input, true)
     }
 
     pub fn directory_with_git_ignore(
         editor: &Editor,
+        client_id: ClientId,
         input: &str,
         git_ignore: bool,
     ) -> Vec<Completion> {
-        filename_impl(editor, input, git_ignore, |entry| {
+        filename_impl(editor, client_id, input, git_ignore, |entry| {
             let is_dir = entry.file_type().is_some_and(|entry| entry.is_dir());
 
             if is_dir {
@@ -591,6 +593,7 @@ pub mod completers {
     // TODO: we could return an iter/lazy thing so it can fetch as many as it needs.
     fn filename_impl<F>(
         editor: &Editor,
+        client_id: ClientId,
         input: &str,
         git_ignore: bool,
         filter_fn: F,
@@ -625,7 +628,7 @@ pub mod completers {
                 match path.parent() {
                     Some(path) if !path.as_os_str().is_empty() => Cow::Borrowed(path),
                     // Path::new("h")'s parent is Some("")...
-                    _ => Cow::Owned(helix_stdx::env::current_working_dir()),
+                    _ => Cow::Owned(client!(editor, client_id).cwd.clone()),
                 }
             };
 

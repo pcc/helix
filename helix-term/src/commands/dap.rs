@@ -207,7 +207,10 @@ pub fn dap_start_impl(
         }
     }
 
-    args.insert("cwd", to_value(helix_stdx::env::current_working_dir())?);
+    args.insert(
+        "cwd",
+        to_value(client!(cx.editor, cx.client_id).cwd.clone())?,
+    );
 
     let args = to_value(args).unwrap();
 
@@ -347,11 +350,11 @@ fn debug_parameter_prompt(
     .to_owned();
 
     let completer = match field_type {
-        "filename" => |editor: &Editor, _client_id: ClientId, input: &str| {
-            ui::completers::filename_with_git_ignore(editor, input, false)
+        "filename" => |editor: &Editor, client_id: ClientId, input: &str| {
+            ui::completers::filename_with_git_ignore(editor, client_id, input, false)
         },
-        "directory" => |editor: &Editor, _client_id: ClientId, input: &str| {
-            ui::completers::directory_with_git_ignore(editor, input, false)
+        "directory" => |editor: &Editor, client_id: ClientId, input: &str| {
+            ui::completers::directory_with_git_ignore(editor, client_id, input, false)
         },
         _ => ui::completers::none,
     };

@@ -38,7 +38,7 @@ pub fn current_working_dir() -> PathBuf {
 }
 
 pub fn set_current_working_dir(path: impl AsRef<Path>) -> std::io::Result<Option<PathBuf>> {
-    let path = crate::path::canonicalize(path);
+    let path = crate::path::canonicalize(crate::env::current_working_dir(), path);
     std::env::set_current_dir(&path)?;
     let mut cwd = CWD.write().unwrap();
 

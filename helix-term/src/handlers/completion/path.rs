@@ -134,7 +134,10 @@ pub(crate) fn path_completion(
 
 #[cfg(unix)]
 fn path_documentation(md: &fs::Metadata, full_path: &Path, kind: &str) -> String {
-    let full_path = fold_home_dir(canonicalize(full_path));
+    let full_path = fold_home_dir(canonicalize(
+        helix_stdx::env::current_working_dir(),
+        full_path,
+    ));
     let full_path_name = full_path.to_string_lossy();
 
     use std::os::unix::prelude::PermissionsExt;

@@ -8,7 +8,6 @@ use helix_lsp::{
     util::lsp_range_to_range,
     LanguageServerId, LspProgressMap,
 };
-use helix_stdx::path::get_relative_path;
 use helix_stdx::socket::read_fd;
 use helix_view::{
     align_view,
@@ -164,6 +163,7 @@ impl ApplicationClient {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ClientInfo {
+    cwd: PathBuf,
     load_tutor: bool,
     split: Option<Layout>,
     files: Vec<(PathBuf, Vec<Position>)>,
@@ -173,6 +173,7 @@ pub struct ClientInfo {
 impl ClientInfo {
     pub fn from_args(args: &Args) -> Self {
         Self {
+            cwd: helix_stdx::env::current_working_dir(),
             load_tutor: args.load_tutor,
             split: args.split,
             files: args
@@ -236,7 +237,7 @@ impl Application {
     ) -> Result<ClientId, Error> {
         use helix_view::editor::Action;
 
-        let client_id: ClientId = self.editor.add_client(client.compositor.size());
+        let client_id: ClientId = self.editor.add_client(client.compositor.size(), info.cwd);
         self.clients.map.insert(client_id, client);
 
         let client = self.clients.map.get_mut(&client_id).unwrap();
@@ -831,7 +832,7 @@ impl Application {
         // TODO: fix being overwritten by lsp
         self.editor.set_status(format!(
             "'{}' written, {}L {}B",
-            get_relative_path(&doc_save_event.path).to_string_lossy(),
+            &doc_save_event.path.to_string_lossy(),
             lines,
             bytes
         ));

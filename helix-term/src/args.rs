@@ -31,7 +31,8 @@ impl Args {
             let (filename, position) = parse_file(file_with_position);
 
             // Before setting the working directory, resolve all the paths in args.files
-            let filename = helix_stdx::path::canonicalize(filename);
+            let filename =
+                helix_stdx::path::canonicalize(helix_stdx::env::current_working_dir(), filename);
 
             args.files
                 .entry(filename)

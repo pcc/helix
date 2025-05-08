@@ -220,15 +220,9 @@ fn expand_variable(
             let position = helix_core::coords_at_pos(text, cursor);
             Ok(Cow::Owned((position.col + 1).to_string()))
         }
-        Variable::BufferName => {
-            // Note: usually we would use `Document::display_name` but we can statically borrow
-            // the scratch buffer name by partially reimplementing `display_name`.
-            if let Some(path) = doc.relative_path() {
-                Ok(Cow::Owned(path.to_string_lossy().into_owned()))
-            } else {
-                Ok(Cow::Borrowed(crate::document::SCRATCH_BUFFER_NAME))
-            }
-        }
+        Variable::BufferName => Ok(Cow::Owned(
+            doc.display_name(client!(editor, client_id).cwd.as_path()),
+        )),
         Variable::LineEnding => Ok(Cow::Borrowed(doc.line_ending.as_str())),
     }
 }

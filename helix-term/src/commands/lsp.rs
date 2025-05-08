@@ -32,7 +32,13 @@ use crate::{
     ui::{self, overlay::overlaid, FileLocation, Picker, Popup, PromptEvent},
 };
 
-use std::{cmp::Ordering, collections::HashSet, fmt::Display, future::Future, path::Path};
+use std::{
+    cmp::Ordering,
+    collections::HashSet,
+    fmt::Display,
+    future::Future,
+    path::{Path, PathBuf},
+};
 
 /// Gets the first language server that is attached to a document which supports a specific feature.
 /// If there is no configured language server that supports the feature, this displays a status message.
@@ -537,9 +543,9 @@ pub fn workspace_symbol_picker(cx: &mut Context) {
                 .unwrap_or_default()
                 .into()
         }),
-        ui::PickerColumn::new("path", |item: &SymbolInformationItem, _| {
+        ui::PickerColumn::new("path", |item: &SymbolInformationItem, cwd: &PathBuf| {
             if let Some(path) = item.location.uri.as_path() {
-                path::get_relative_path(path)
+                path::get_relative_path(cwd, path)
                     .to_string_lossy()
                     .to_string()
                     .into()
@@ -554,7 +560,7 @@ pub fn workspace_symbol_picker(cx: &mut Context) {
         columns,
         1, // name column
         [],
-        (),
+        client!(cx.editor, cx.client_id).cwd.clone(),
         move |cx, item, action| {
             jump_to_location(cx.editor, cx.client_id, &item.location, action);
         },
@@ -862,7 +868,7 @@ fn goto_impl(
     compositor: &mut Compositor,
     locations: Vec<Location>,
 ) {
-    let cwdir = helix_stdx::env::current_working_dir();
+    let cwdir = client_mut!(editor, client_id).cwd.clone();
 
     match locations.as_slice() {
         [location] => {

@@ -72,7 +72,8 @@ impl Client {
         doc_path: Option<&std::path::PathBuf>,
         may_support_workspace: bool,
     ) -> bool {
-        let (workspace, workspace_is_cwd) = find_workspace();
+        let (workspace, workspace_is_cwd) =
+            find_workspace(helix_stdx::env::current_working_dir().as_path());
         let workspace = path::normalize(workspace);
         let root = find_lsp_workspace(
             doc_path

@@ -129,10 +129,10 @@ pub fn normalize(path: impl AsRef<Path>) -> PathBuf {
 ///
 /// This function is used instead of [`std::fs::canonicalize`] because we don't want to verify
 /// here if the path exists, just normalize it's components.
-pub fn canonicalize(path: impl AsRef<Path>) -> PathBuf {
+pub fn canonicalize(cwd: impl AsRef<Path>, path: impl AsRef<Path>) -> PathBuf {
     let path = expand_tilde(path.as_ref());
     let path = if path.is_relative() {
-        Cow::Owned(current_working_dir().join(path))
+        Cow::Owned(cwd.as_ref().join(path))
     } else {
         path
     };
@@ -140,13 +140,13 @@ pub fn canonicalize(path: impl AsRef<Path>) -> PathBuf {
     normalize(path)
 }
 
-pub fn get_relative_path<'a, P>(path: P) -> Cow<'a, Path>
+pub fn get_relative_path<'a, P>(cwd: impl AsRef<Path>, path: P) -> Cow<'a, Path>
 where
     P: Into<Cow<'a, Path>>,
 {
     let path = path.into();
     if path.is_absolute() {
-        let cwdir = normalize(current_working_dir());
+        let cwdir = normalize(cwd);
         if let Ok(stripped) = normalize(&path).strip_prefix(cwdir) {
             return Cow::Owned(PathBuf::from(stripped));
         }

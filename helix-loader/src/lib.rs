@@ -141,7 +141,10 @@ pub fn log_file() -> PathBuf {
 }
 
 pub fn workspace_config_file() -> PathBuf {
-    find_workspace().0.join(".helix").join("config.toml")
+    find_workspace(helix_stdx::env::current_working_dir().as_path())
+        .0
+        .join(".helix")
+        .join("config.toml")
 }
 
 pub fn lang_config_file() -> PathBuf {
@@ -242,9 +245,8 @@ pub fn merge_toml_values(left: toml::Value, right: toml::Value, merge_depth: usi
 /// and returns the first directory that contains either `.git`, `.svn`, `.jj` or `.helix`.
 /// If no workspace was found returns (CWD, true).
 /// Otherwise (workspace, false) is returned
-pub fn find_workspace() -> (PathBuf, bool) {
-    let current_dir = current_working_dir();
-    for ancestor in current_dir.ancestors() {
+pub fn find_workspace(cwd: &Path) -> (PathBuf, bool) {
+    for ancestor in cwd.ancestors() {
         if ancestor.join(".git").exists()
             || ancestor.join(".svn").exists()
             || ancestor.join(".jj").exists()
@@ -254,7 +256,7 @@ pub fn find_workspace() -> (PathBuf, bool) {
         }
     }
 
-    (current_dir, true)
+    (cwd.to_path_buf(), true)
 }
 
 fn default_config_file() -> PathBuf {
