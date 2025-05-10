@@ -130,6 +130,12 @@ FLAGS:
         .map(PathBuf::from)
         .unwrap_or(std::env::temp_dir())
         .join("helix");
+
+    if args.foreground_server {
+        let _ = std::fs::remove_file(&socket_path);
+        std::process::exit(server(args, &socket_path).unwrap());
+    }
+
     let client_sock = UnixStream::connect(&socket_path);
     let mut client_sock = client_sock.unwrap_or_else(|_e| {
         // SAFETY: At this point we are running single threaded so fork() won't lead to deadlocks.
@@ -163,8 +169,11 @@ FLAGS:
         }
     });
 
-    write_fd(&client_sock, &tty_file()?)?;
     rmp_serde::encode::write(&mut client_sock, &client_info)?;
+    write_fd(&client_sock, &tty_file()?)?;
+    if client_info.has_stdin {
+        write_fd(&client_sock, std::io::stdin())?;
+    }
     client_sock.set_nonblocking(true)?;
     std::process::exit(client(client_sock)?);
 }

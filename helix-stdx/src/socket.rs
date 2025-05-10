@@ -8,7 +8,7 @@ use std::io::IoSlice;
 use std::io::{self, IoSliceMut};
 use std::mem::MaybeUninit;
 
-pub fn write_fd<Fd: AsFd>(socket: Fd, file: &File) -> io::Result<()> {
+pub fn write_fd<Fd: AsFd>(socket: Fd, file: impl AsFd) -> io::Result<()> {
     let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
     let mut buf = SendAncillaryBuffer::new(&mut space);
     let fd_arr = [file.as_fd()];

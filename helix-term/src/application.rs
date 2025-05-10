@@ -44,7 +44,8 @@ use core::pin::Pin;
 use log::{debug, error, info, warn};
 use std::{
     collections::HashMap,
-    io::{stdin, ErrorKind},
+    fs::File,
+    io::ErrorKind,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -126,8 +127,7 @@ pub struct ApplicationClient {
     id: ClientId,
     pgid: i32,
     terminal: Terminal,
-    socket: Option<UnixStream>,
-    socket_tx: Option<OwnedWriteHalf>,
+    socket_tx: OwnedWriteHalf,
     terminal_stream: Option<TerminalStream>,
     pub compositor: Compositor,
 }
@@ -137,7 +137,7 @@ impl ApplicationClient {
         config: helix_view::editor::Config,
         pgid: i32,
         terminal: crossterm::terminal::Terminal,
-        socket: UnixStream,
+        socket_tx: OwnedWriteHalf,
     ) -> Result<Self, Error> {
         #[cfg(not(feature = "integration"))]
         let backend = CrosstermBackend::new(terminal, &config);
@@ -153,8 +153,7 @@ impl ApplicationClient {
             id: ClientId::default(),
             pgid,
             terminal,
-            socket: Some(socket),
-            socket_tx: None,
+            socket_tx,
             terminal_stream: None,
             compositor,
         })
@@ -168,6 +167,7 @@ pub struct ClientInfo {
     split: Option<Layout>,
     files: Vec<(PathBuf, Vec<Position>)>,
     pub pgid: i32,
+    pub has_stdin: bool,
 }
 
 impl ClientInfo {
@@ -183,6 +183,7 @@ impl ClientInfo {
                 .collect(),
             // SAFETY: It's perfectly safe, I assure you.
             pgid: unsafe { libc::getpgrp() },
+            has_stdin: unsafe { libc::isatty(libc::STDIN_FILENO) == 0 },
         }
     }
 }
@@ -233,15 +234,23 @@ impl Application {
     pub fn add_client(
         &mut self,
         info: ClientInfo,
-        client: ApplicationClient,
+        tty: File,
+        mut stdin: Option<File>,
+        socket: UnixStream,
     ) -> Result<ClientId, Error> {
         use helix_view::editor::Action;
 
-        let client_id: ClientId = self.editor.add_client(client.compositor.size(), info.cwd);
-        self.clients.map.insert(client_id, client);
-
-        let client = self.clients.map.get_mut(&client_id).unwrap();
+        let (rx, tx) = socket.into_split();
+        let mut client = ApplicationClient::new(
+            self.config.load().editor.clone(),
+            info.pgid,
+            crossterm::terminal::Terminal::new(tty, winch_signal_receiver()?),
+            tx,
+        )?;
+        let client_id = self.editor.add_client(client.compositor.size(), info.cwd);
         client.id = client_id;
+        self.clients.map.insert(client_id, client);
+        let client = self.clients.map.get_mut(&client_id).unwrap();
 
         let mut terminal_input = client.terminal.backend_mut().take_input_stream();
         let terminal_event = Box::pin(stream! {
@@ -254,9 +263,6 @@ impl Application {
             .terminal_streams
             .insert(client_id, terminal_event);
 
-        let socket = client.socket.take().unwrap();
-        let (rx, tx) = socket.into_split();
-        client.socket_tx = Some(tx);
         let socket_event = Box::pin(stream! {
             loop {
                  if rx.readable().await.is_err() {
@@ -378,11 +384,11 @@ impl Application {
             } else {
                 self.editor.new_file(client_id, Action::VerticalSplit);
             }
-        } else if stdin().is_tty() || cfg!(feature = "integration") {
+        } else if stdin.is_none() || cfg!(feature = "integration") {
             self.editor.new_file(client_id, Action::VerticalSplit);
         } else {
             self.editor
-                .new_file_from_stdin(client_id, Action::VerticalSplit)
+                .new_file_from_reader(client_id, Action::VerticalSplit, stdin.as_mut().unwrap())
                 .unwrap_or_else(|_| self.editor.new_file(client_id, Action::VerticalSplit));
         }
 
@@ -396,24 +402,23 @@ impl Application {
         client_sock: tokio::net::UnixStream,
     ) -> anyhow::Result<()> {
         let mut client_io_bridge = SyncIoBridge::new(client_sock);
-        let (client, client_info, client_io_bridge) = spawn_blocking(move || {
-            (
-                read_fd(client_io_bridge.as_mut()),
-                rmp_serde::from_read(&mut client_io_bridge),
-                client_io_bridge,
-            )
+        let (client_info, client_tty, client_stdin, client_io_bridge) = spawn_blocking(move || {
+            let client_info: ClientInfo = rmp_serde::from_read(&mut client_io_bridge)?;
+            let client_tty = read_fd(client_io_bridge.as_mut())?;
+            let client_stdin = if client_info.has_stdin {
+                Some(read_fd(client_io_bridge.as_mut())?)
+            } else {
+                None
+            };
+
+            anyhow::Ok((client_info, client_tty, client_stdin, client_io_bridge))
         })
-        .await?;
-        let client_info: ClientInfo = client_info?;
-        let pgid = client_info.pgid;
+        .await??;
         let client_id = self.add_client(
             client_info,
-            ApplicationClient::new(
-                self.config.load().editor.clone(),
-                pgid,
-                crossterm::terminal::Terminal::new(client?, winch_signal_receiver()?),
-                client_io_bridge.into_inner(),
-            )?,
+            client_tty,
+            client_stdin,
+            client_io_bridge.into_inner(),
         )?;
         Application::claim_term(self.clients.map.get_mut(&client_id).unwrap(), &self.config)
             .await?;
@@ -500,7 +505,7 @@ impl Application {
                     if self.editor.should_close(client_id) {
                         let client = self.clients.map.get_mut(&client_id).unwrap();
                         Application::restore_term(client, &self.config).unwrap();
-                        client.socket_tx.as_mut().unwrap().write_u8(0).await.unwrap();
+                        client.socket_tx.write_u8(0).await.unwrap();
 
                         self.clients.map.remove(&client_id);
                         self.clients.socket_streams.remove(&client_id);
