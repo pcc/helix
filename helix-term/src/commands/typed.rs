@@ -690,9 +690,19 @@ pub(super) fn buffers_remaining_impl(
     editor: &mut Editor,
     client_id: ClientId,
 ) -> anyhow::Result<()> {
+    let views: Vec<_> = client!(editor, client_id)
+        .tree
+        .views(&editor.views)
+        .map(|(view, _)| view.id)
+        .collect();
+
+    // Find modified documents with selections for a view in this client.
+    // This is roughly "files that were edited in this client".
     let modified_ids: Vec<_> = editor
         .documents()
-        .filter(|doc| doc.is_modified())
+        .filter(|doc| {
+            doc.is_modified() && views.iter().any(|view| doc.selections().contains_key(view))
+        })
         .map(|doc| doc.id())
         .collect();
 
