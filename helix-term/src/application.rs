@@ -482,6 +482,10 @@ impl Application {
 
     pub async fn event_loop_until_idle(&mut self) -> bool {
         loop {
+            if self.editor.exit_code.is_some() {
+                return false;
+            }
+
             use futures_util::StreamExt;
 
             tokio::select! {
@@ -505,7 +509,7 @@ impl Application {
                     if self.editor.should_close(client_id) {
                         let client = self.clients.map.get_mut(&client_id).unwrap();
                         Application::restore_term(client, &self.config).unwrap();
-                        client.socket_tx.write_u8(0).await.unwrap();
+                        client.socket_tx.write_u8(client!(self.editor, client_id).exit_code as u8).await.unwrap();
 
                         self.clients.map.remove(&client_id);
                         self.clients.socket_streams.remove(&client_id);
@@ -1424,11 +1428,11 @@ impl Application {
         }
 
         for err in close_errs {
-            self.editor.exit_code = 1;
+            self.editor.exit_code = Some(1);
             eprintln!("Error: {}", err);
         }
 
-        Ok(self.editor.exit_code)
+        Ok(self.editor.exit_code.unwrap())
     }
 
     pub async fn close(&mut self) -> Vec<anyhow::Error> {

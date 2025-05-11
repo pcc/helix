@@ -85,7 +85,7 @@ fn quit(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow
         .count()
         == 1
     {
-        buffers_remaining_impl(cx.editor, cx.client_id)?
+        buffers_remaining_impl(cx.editor, cx.client_id, false)?
     }
 
     cx.block_try_flush_writes()?;
@@ -689,6 +689,7 @@ fn force_write_quit(
 pub(super) fn buffers_remaining_impl(
     editor: &mut Editor,
     client_id: ClientId,
+    all_clients: bool,
 ) -> anyhow::Result<()> {
     let views: Vec<_> = client!(editor, client_id)
         .tree
@@ -701,7 +702,8 @@ pub(super) fn buffers_remaining_impl(
     let modified_ids: Vec<_> = editor
         .documents()
         .filter(|doc| {
-            doc.is_modified() && views.iter().any(|view| doc.selections().contains_key(view))
+            doc.is_modified()
+                && (all_clients || views.iter().any(|view| doc.selections().contains_key(view)))
         })
         .map(|doc| doc.id())
         .collect();
@@ -890,7 +892,7 @@ fn force_write_all_quit(
 fn quit_all_impl(cx: &mut compositor::Context, force: bool) -> anyhow::Result<()> {
     cx.block_try_flush_writes()?;
     if !force {
-        buffers_remaining_impl(cx.editor, cx.client_id)?;
+        buffers_remaining_impl(cx.editor, cx.client_id, false)?;
     }
 
     // close all views
@@ -936,7 +938,7 @@ fn cquit(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         .and_then(|code| code.parse::<i32>().ok())
         .unwrap_or(1);
 
-    cx.editor.exit_code = exit_code;
+    client_mut!(cx.editor, cx.client_id).exit_code = exit_code;
     quit_all_impl(cx, false)
 }
 
@@ -949,9 +951,28 @@ fn force_cquit(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> 
         .first()
         .and_then(|code| code.parse::<i32>().ok())
         .unwrap_or(1);
-    cx.editor.exit_code = exit_code;
+    client_mut!(cx.editor, cx.client_id).exit_code = exit_code;
 
     quit_all_impl(cx, true)
+}
+
+fn kill(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    buffers_remaining_impl(cx.editor, cx.client_id, true)?;
+    cx.editor.exit_code = Some(0);
+    Ok(())
+}
+
+fn force_kill(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    cx.editor.exit_code = Some(0);
+    Ok(())
 }
 
 fn theme(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {
@@ -2995,6 +3016,28 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, Some(1)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "kill",
+        aliases: &[],
+        doc: "Kill the server.",
+        fun: kill,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "kill!",
+        aliases: &[],
+        doc: "Kill the server ignoring unsaved changes.",
+        fun: force_kill,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
             ..Signature::DEFAULT
         },
     },

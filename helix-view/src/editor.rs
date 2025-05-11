@@ -1064,6 +1064,7 @@ pub struct EditorClient {
     pub cwd: PathBuf,
     last_cwd: Option<PathBuf>,
     pub suspended: bool,
+    pub exit_code: i32,
 }
 
 #[derive(Debug)]
@@ -1194,7 +1195,7 @@ pub struct Editor {
     redraw_timer: Pin<Box<Sleep>>,
     pub last_completion: Option<CompleteAction>,
 
-    pub exit_code: i32,
+    pub exit_code: Option<i32>,
 
     pub config_events: (UnboundedSender<ConfigEvent>, UnboundedReceiver<ConfigEvent>),
     pub needs_redraw: bool,
@@ -1322,7 +1323,7 @@ impl Editor {
             last_completion: None,
             config,
             auto_pairs,
-            exit_code: 0,
+            exit_code: None,
             config_events: unbounded_channel(),
             needs_redraw: false,
             handlers,
@@ -1344,6 +1345,7 @@ impl Editor {
             autoinfo: None,
             cwd,
             last_cwd: None,
+            exit_code: 0,
             suspended: false,
         })
     }

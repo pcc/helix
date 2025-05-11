@@ -5712,7 +5712,7 @@ fn wclose(cx: &mut Context) {
         .count()
         == 1
     {
-        if let Err(err) = typed::buffers_remaining_impl(cx.editor, cx.client_id) {
+        if let Err(err) = typed::buffers_remaining_impl(cx.editor, cx.client_id, false) {
             cx.editor.set_error(err.to_string());
             return;
         }
