@@ -1,6 +1,7 @@
 use anyhow::{Context, Error, Result};
 use crossterm::terminal::{tty_file, winch_signal_receiver, Terminal};
 use helix_loader::VERSION_AND_GIT_HASH;
+use helix_stdx::env::set_current_working_dir;
 use helix_stdx::socket::{read_fd, write_fd};
 use helix_term::application::{Application, ApplicationClient, ClientInfo};
 use helix_term::args::Args;
@@ -125,11 +126,18 @@ FLAGS:
 
     let client_info = ClientInfo::from_args(&args);
 
-    let socket_path = std::env::var_os("XDG_RUNTIME_DIR")
+    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
         .as_ref()
         .map(PathBuf::from)
-        .unwrap_or(std::env::temp_dir())
-        .join("helix");
+        .unwrap_or(std::env::temp_dir());
+    // Change directory to $XDG_RUNTIME_DIR. This has three purposes:
+    // 1) Flush out any unknown dependencies on the server's current directory.
+    // 2) Avoids issues associated with the server retaining a handle to the initial
+    //    client's current directory (e.g. failure to unmount filesystems).
+    // 3) Avoids filename length limits on the socket (UNIX_PATH_MAX in sockaddr_un).
+    set_current_working_dir(runtime_dir)?;
+
+    let socket_path = Path::new("helix");
 
     if args.foreground_server {
         let _ = std::fs::remove_file(&socket_path);
