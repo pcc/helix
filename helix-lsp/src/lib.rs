@@ -953,9 +953,9 @@ fn start_client(
 pub fn find_lsp_workspace(
     file: &str,
     root_markers: &[String],
-    root_dirs: &[PathBuf],
-    workspace: &Path,
-    workspace_is_cwd: bool,
+    _root_dirs: &[PathBuf],
+    _workspace: &Path,
+    _workspace_is_cwd: bool,
 ) -> Option<PathBuf> {
     let file = std::path::Path::new(file);
     let mut file = if file.is_absolute() {
@@ -966,38 +966,18 @@ pub fn find_lsp_workspace(
     };
     file = path::normalize(&file);
 
-    if !file.starts_with(workspace) {
-        return None;
-    }
-
-    let mut top_marker = None;
+    // TODO: Make workspace-lsp-roots work again here after figuring out what
+    // exactly it is supposed to do.
     for ancestor in file.ancestors() {
         if root_markers
             .iter()
             .any(|marker| ancestor.join(marker).exists())
         {
-            top_marker = Some(ancestor);
-        }
-
-        if root_dirs
-            .iter()
-            .any(|root_dir| path::normalize(workspace.join(root_dir)) == ancestor)
-        {
-            // if the worskapce is the cwd do not search any higher for workspaces
-            // but specify
-            return Some(top_marker.unwrap_or(workspace).to_owned());
-        }
-        if ancestor == workspace {
-            // if the workspace is the CWD, let the LSP decide what the workspace
-            // is
-            return top_marker
-                .or_else(|| (!workspace_is_cwd).then_some(workspace))
-                .map(Path::to_owned);
+            return Some(ancestor.to_path_buf());
         }
     }
 
-    debug_assert!(false, "workspace must be an ancestor of <file>");
-    None
+    file.parent().map(|p| p.to_path_buf())
 }
 
 #[cfg(test)]
