@@ -1945,6 +1945,8 @@ impl Editor {
     }
 
     pub fn close(&mut self, id: ViewId) {
+        let previous_doc = view!(self, id).doc;
+
         // Remove selections for the closed view on all documents.
         for doc in self.documents_mut() {
             doc.remove_view(id);
@@ -1953,9 +1955,23 @@ impl Editor {
             .tree
             .remove(&mut self.views, id);
         self._refresh();
+
+        // If the buffer we just closed is unmodified and isn't open in another view,
+        // there's no good reason to remember it. This reduces the chance of problems
+        // with commands such as `git commit`.
+        if !doc_with_id!(self, &previous_doc).is_modified()
+            && self.views.iter().all(|view| view.doc != previous_doc)
+        {
+            let _ = self.close_document(previous_doc, false, false);
+        }
     }
 
-    pub fn close_document(&mut self, doc_id: DocumentId, force: bool) -> Result<(), CloseError> {
+    pub fn close_document(
+        &mut self,
+        doc_id: DocumentId,
+        force: bool,
+        ensure_view: bool,
+    ) -> Result<(), CloseError> {
         let doc = match self.documents.get(&doc_id) {
             Some(doc) => doc,
             None => return Err(CloseError::DoesNotExist),
@@ -2005,34 +2021,36 @@ impl Editor {
 
         let doc = self.documents.remove(&doc_id).unwrap();
 
-        // If the document we removed was visible in all views, we will have no more views. We don't
-        // want to close the editor just for a simple buffer close, so we need to create a new view
-        // containing either an existing document, or a brand new document.
-        let empty_clients: Vec<ClientId> = self
-            .clients
-            .iter()
-            .filter_map(|(id, client)| {
-                if client.tree.views(&self.views).next().is_none() {
-                    Some(id)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        for client_id in empty_clients {
-            let doc_id = self
-                .documents
+        if ensure_view {
+            // If the document we removed was visible in all views, we will have no more views. We don't
+            // want to close the editor just for a simple buffer close, so we need to create a new view
+            // containing either an existing document, or a brand new document.
+            let empty_clients: Vec<ClientId> = self
+                .clients
                 .iter()
-                .map(|(&doc_id, _)| doc_id)
-                .next()
-                .unwrap_or_else(|| self.new_document(Document::default(self.config.clone())));
-            let view = View::new(doc_id, self.config().gutters.clone());
-            let view_id = client_mut!(self, client_id)
-                .tree
-                .insert(&mut self.views, view);
-            let doc = doc_with_id_mut!(self, &doc_id);
-            doc.ensure_view_init(view_id);
-            doc.mark_as_focused();
+                .filter_map(|(id, client)| {
+                    if client.tree.views(&self.views).next().is_none() {
+                        Some(id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            for client_id in empty_clients {
+                let doc_id = self
+                    .documents
+                    .iter()
+                    .map(|(&doc_id, _)| doc_id)
+                    .next()
+                    .unwrap_or_else(|| self.new_document(Document::default(self.config.clone())));
+                let view = View::new(doc_id, self.config().gutters.clone());
+                let view_id = client_mut!(self, client_id)
+                    .tree
+                    .insert(&mut self.views, view);
+                let doc = doc_with_id_mut!(self, &doc_id);
+                doc.ensure_view_init(view_id);
+                doc.mark_as_focused();
+            }
         }
 
         self._refresh();

@@ -151,7 +151,7 @@ fn buffer_close_by_ids_impl(
     let (modified_ids, modified_names): (Vec<_>, Vec<_>) = doc_ids
         .iter()
         .filter_map(|&doc_id| {
-            if let Err(CloseError::BufferModified) = cx.editor.close_document(doc_id, force) {
+            if let Err(CloseError::BufferModified) = cx.editor.close_document(doc_id, force, true) {
                 Some((
                     doc_id,
                     doc_with_id!(cx.editor, &doc_id)
