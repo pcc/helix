@@ -1,0 +1,5 @@
+#!/bin/bash
+
+srcdir=$(dirname $(realpath $0))
+
+HELIX_RUNTIME=$srcdir/runtime exec $srcdir/target/release/hx "$@"
