@@ -4997,8 +4997,9 @@ fn format_selections(cx: &mut Context) {
             )
         })
     else {
-        cx.editor
-            .set_error("No configured language server supports range formatting");
+        goto_next_paragraph(cx);
+        goto_prev_paragraph(cx);
+        shell2(cx, "fmt", &ShellBehavior::Replace);
         return;
     };
 
@@ -6367,6 +6368,19 @@ async fn shell_impl_async(
 }
 
 fn shell(cx: &mut compositor::Context, cmd: &str, behavior: &ShellBehavior) {
+    let mut cx = Context {
+        editor: cx.editor,
+        client_id: cx.client_id,
+        count: None,
+        register: None,
+        callback: Vec::new(),
+        on_next_key_callback: None,
+        jobs: cx.jobs,
+    };
+    shell2(&mut cx, cmd, behavior)
+}
+
+fn shell2(cx: &mut Context, cmd: &str, behavior: &ShellBehavior) {
     let pipe = match behavior {
         ShellBehavior::Replace | ShellBehavior::Ignore => true,
         ShellBehavior::Insert | ShellBehavior::Append => false,
