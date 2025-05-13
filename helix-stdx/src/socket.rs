@@ -25,7 +25,7 @@ pub fn read_fd<Fd: AsFd>(socket: Fd) -> io::Result<File> {
         socket,
         &mut [IoSliceMut::new(&mut recv_buf)],
         &mut buf,
-        RecvFlags::empty(),
+        RecvFlags::CMSG_CLOEXEC,
     )?;
     if let Some(RecvAncillaryMessage::ScmRights(mut fd)) = buf.drain().next() {
         if let Some(fd) = fd.next() {

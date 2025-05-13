@@ -226,6 +226,10 @@ async fn server(args: Args, socket_path: &Path) -> Result<i32> {
 
     setup_logging(args.verbosity).context("failed to initialize logging")?;
 
+    let socket = UnixSocket::new_stream()?;
+    socket.bind(socket_path)?;
+    let listener = socket.listen(1024)?;
+
     // NOTE: Set the working directory early so the correct configuration is loaded. Be aware that
     // Application::new() depends on this logic so it must be updated if this changes.
     if let Some(path) = &args.working_directory {
@@ -258,11 +262,6 @@ async fn server(args: Args, socket_path: &Path) -> Result<i32> {
         let _ = std::io::stdin().read(&mut []);
         helix_core::config::default_lang_loader()
     });
-
-    let socket = UnixSocket::new_stream()?;
-    socket.bind(socket_path)?;
-
-    let listener = socket.listen(1024)?;
 
     // TODO: use the thread local executor to spawn the application task separately from the work pool
     let mut app =

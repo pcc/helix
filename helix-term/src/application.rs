@@ -497,7 +497,7 @@ impl Application {
                     self.render().await;
                 }
                 Some((client_id, signal)) = self.clients.socket_streams.next() => {
-                    if !self.handle_signals(client_id, signal.unwrap()).await {
+                    if !self.handle_signals(client_id, signal).await {
                         return false;
                     }
                 }
@@ -714,10 +714,10 @@ impl Application {
     }
 
     #[cfg(not(windows))]
-    pub async fn handle_signals(&mut self, client_id: ClientId, signal: i32) -> bool {
+    pub async fn handle_signals(&mut self, client_id: ClientId, signal: Option<i32>) -> bool {
         let client = self.clients.map.get_mut(&client_id).unwrap();
         match signal {
-            signal::SIGTSTP => {
+            Some(signal::SIGTSTP) => {
                 client_mut!(self.editor, client.id).suspended = true;
                 Application::suspend_client(
                     client,
@@ -726,7 +726,7 @@ impl Application {
                 )
                 .await;
             }
-            signal::SIGCONT => {
+            Some(signal::SIGCONT) => {
                 // Copy/Paste from same issue from neovim:
                 // https://github.com/neovim/neovim/issues/12322
                 // https://github.com/neovim/neovim/pull/13084
@@ -749,7 +749,7 @@ impl Application {
                     .insert(client.id, client.terminal_stream.take().unwrap());
                 Application::render_client(client, &mut self.editor, &mut self.jobs).await;
             }
-            signal::SIGWINCH => {
+            Some(signal::SIGWINCH) => {
                 let mut cx = crate::compositor::Context {
                     editor: &mut self.editor,
                     client_id: client.id,
@@ -769,15 +769,33 @@ impl Application {
                     .handle_event(&Event::Resize(area.width, area.height), &mut cx);
                 Application::render_client(client, &mut self.editor, &mut self.jobs).await;
             }
-            signal::SIGUSR1 => {
+            Some(signal::SIGUSR1) => {
                 self.refresh_config();
                 let client = self.clients.map.get_mut(&client_id).unwrap();
                 Application::render_client(client, &mut self.editor, &mut self.jobs).await;
             }
-            signal::SIGTERM | signal::SIGINT => {
-                // TODO: Shouldn't kill the whole server,
-                Application::restore_term(client, &self.config).unwrap();
-                return false;
+            Some(signal::SIGTERM) | Some(signal::SIGINT) | None => {
+                // Termination signal to client process or client EOF, indicating that the client
+                // was forcibly killed (e.g. SIGKILL) or crashed. Handled by force quitting all views in
+                // the client.
+                if !client!(self.editor, client_id).suspended {
+                    // This may fail if the terminal emulator was closed or crashed, so discard the error.
+                    let _ = Application::restore_term(client, &self.config);
+                }
+                while !self.editor.should_close(client_id) {
+                    self.editor
+                        .close(client!(self.editor, client_id).tree.focus);
+                }
+
+                // This may fail if the client process died, so discard the error.
+                let _ = client
+                    .socket_tx
+                    .write_u8(client!(self.editor, client_id).exit_code as u8)
+                    .await;
+
+                self.clients.map.remove(&client_id);
+                self.clients.socket_streams.remove(&client_id);
+                self.clients.terminal_streams.remove(&client_id);
             }
             _ => unreachable!(),
         }
