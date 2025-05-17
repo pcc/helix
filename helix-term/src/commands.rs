@@ -6265,7 +6265,7 @@ fn shell_keep_pipe(cx: &mut Context) {
             if input.is_empty() {
                 return;
             }
-            let (_client, view, doc) = current!(cx.editor, cx.client_id);
+            let (client, view, doc) = current!(cx.editor, cx.client_id);
             let selection = doc.selection(view.id);
 
             let mut ranges = SmallVec::with_capacity(selection.len());
@@ -6275,7 +6275,7 @@ fn shell_keep_pipe(cx: &mut Context) {
 
             for (i, range) in selection.ranges().iter().enumerate() {
                 let fragment = range.slice(text);
-                if let Err(err) = shell_impl(shell, input, Some(fragment.into())) {
+                if let Err(err) = shell_impl(&client.cwd, shell, input, Some(fragment.into())) {
                     log::debug!("Shell command failed: {}", err);
                 } else {
                     ranges.push(*range);
@@ -6296,11 +6296,17 @@ fn shell_keep_pipe(cx: &mut Context) {
     );
 }
 
-fn shell_impl(shell: &[String], cmd: &str, input: Option<Rope>) -> anyhow::Result<Tendril> {
-    tokio::task::block_in_place(|| helix_lsp::block_on(shell_impl_async(shell, cmd, input)))
+fn shell_impl(
+    cwd: &Path,
+    shell: &[String],
+    cmd: &str,
+    input: Option<Rope>,
+) -> anyhow::Result<Tendril> {
+    tokio::task::block_in_place(|| helix_lsp::block_on(shell_impl_async(cwd, shell, cmd, input)))
 }
 
 async fn shell_impl_async(
+    cwd: &Path,
     shell: &[String],
     cmd: &str,
     input: Option<Rope>,
@@ -6311,6 +6317,7 @@ async fn shell_impl_async(
 
     let mut process = Command::new(&shell[0]);
     process
+        .current_dir(cwd)
         .args(&shell[1..])
         .arg(cmd)
         .stdout(Stdio::piped())
@@ -6388,7 +6395,7 @@ fn shell2(cx: &mut Context, cmd: &str, behavior: &ShellBehavior) {
 
     let config = cx.editor.config();
     let shell = &config.shell;
-    let (_client, view, doc) = current!(cx.editor, cx.client_id);
+    let (client, view, doc) = current!(cx.editor, cx.client_id);
     let selection = doc.selection(view.id);
 
     let mut changes = Vec::with_capacity(selection.len());
@@ -6402,7 +6409,7 @@ fn shell2(cx: &mut Context, cmd: &str, behavior: &ShellBehavior) {
             output.clone()
         } else {
             let input = range.slice(text);
-            match shell_impl(shell, cmd, pipe.then(|| input.into())) {
+            match shell_impl(&client.cwd, shell, cmd, pipe.then(|| input.into())) {
                 Ok(mut output) => {
                     if !input.ends_with("\n") && output.ends_with('\n') {
                         output.pop();

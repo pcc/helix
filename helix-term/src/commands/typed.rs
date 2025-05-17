@@ -2414,8 +2414,9 @@ fn run_shell_command(
     let args = args.join(" ");
 
     let client_id = cx.client_id;
+    let cwd = client!(cx.editor, client_id).cwd.clone();
     let callback = async move {
-        let output = shell_impl_async(&shell, &args, None).await?;
+        let output = shell_impl_async(&cwd, &shell, &args, None).await?;
         let call: job::Callback = Callback::EditorCompositor(
             client_id,
             Box::new(move |editor: &mut Editor, compositor: &mut Compositor| {
