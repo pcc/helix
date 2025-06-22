@@ -1049,12 +1049,14 @@ impl Application {
                         log::info!("window/logMessage: {:?}", params);
                     }
                     Notification::ProgressMessage(params)
-                        if !self
+                        if self
                             .clients
                             .by_id(self.editor.most_recent_client_id.unwrap())
-                            .unwrap()
-                            .compositor
-                            .has_component(std::any::type_name::<ui::Prompt>()) =>
+                            .is_some_and(|client| {
+                                !client
+                                    .compositor
+                                    .has_component(std::any::type_name::<ui::Prompt>())
+                            }) =>
                     {
                         let editor_view = self
                             .clients
